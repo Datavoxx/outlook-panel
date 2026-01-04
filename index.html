@@ -4,17 +4,268 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>AI-panel</title>
+    <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
     <style>
-      body { font-family: system-ui, sans-serif; padding: 16px; }
-      .card { border: 1px solid #e5e7eb; border-radius: 12px; padding: 14px; }
-      h1 { font-size: 16px; margin: 0 0 8px; }
-      p { margin: 0; color: #374151; }
+      body { font-family: system-ui, -apple-system, Segoe UI, sans-serif; padding: 12px; }
+      .card { border: 1px solid #e5e7eb; border-radius: 14px; padding: 12px; margin-bottom: 10px; }
+      .row { display:flex; gap:8px; align-items:center; flex-wrap: wrap; }
+      h1 { font-size: 15px; margin: 0 0 6px; }
+      .muted { color:#6b7280; font-size:12px; }
+      button { border:1px solid #d1d5db; background:#fff; padding:8px 10px; border-radius:12px; cursor:pointer; }
+      button.primary { border-color:#111827; }
+      button:disabled { opacity:.6; cursor:not-allowed; }
+      textarea { width:100%; min-height:64px; border:1px solid #d1d5db; border-radius:12px; padding:10px; resize:vertical; }
+      pre { white-space:pre-wrap; word-break:break-word; background:#f9fafb; border:1px solid #eee; padding:10px; border-radius:12px; }
+      select, input[type="datetime-local"] { border:1px solid #d1d5db; border-radius:12px; padding:8px 10px; }
+      .badge { display:inline-block; padding:2px 8px; border-radius:999px; background:#f3f4f6; font-size:12px; }
     </style>
   </head>
   <body>
     <div class="card">
-      <h1>Din AI-assistent</h1>
-      <p>AI-panelen är laddad ✅</p>
+      <h1>AI-assistent</h1>
+      <div class="muted" id="status">Startar…</div>
+      <div class="muted" style="margin-top:6px;">
+        <span class="badge" id="fromBadge">Från: –</span>
+        <span class="badge" id="subjectBadge">Ämne: –</span>
+      </div>
     </div>
+
+    <div class="card">
+      <div class="row" id="quickActions"></div>
+      <div class="muted" style="margin-top:6px;">Snabbval (klick genererar svar)</div>
+    </div>
+
+    <div class="card">
+      <div class="muted" style="margin-bottom:6px;">Eget direktiv</div>
+      <textarea id="instruction" placeholder="t.ex. Tacka och föreslå provkörning på fredag."></textarea>
+      <div class="row" style="margin-top:8px;">
+        <button class="primary" id="btnGenerate" disabled>Generera svar</button>
+        <button id="btnCopy" disabled>Kopiera utkast</button>
+      </div>
+      <div class="muted" style="margin-top:8px;">Utkast</div>
+      <pre id="draft">Väntar…</pre>
+    </div>
+
+    <div class="card">
+      <div class="row">
+        <label class="row" style="gap:6px;">
+          <input type="checkbox" id="remindCheck" />
+          <span>Påminn mig</span>
+        </label>
+
+        <select id="remindPreset" disabled>
+          <option value="2d">Om 2 dagar</option>
+          <option value="3d">Om 3 dagar</option>
+          <option value="1w">Om 1 vecka</option>
+          <option value="custom">Välj datum/tid</option>
+        </select>
+
+        <input type="datetime-local" id="remindAt" disabled />
+        <button id="btnSaveReminder" disabled>Spara påminnelse</button>
+      </div>
+      <div class="muted" style="margin-top:6px;">Skickas som no-reply (via din backend) när tiden är inne.</div>
+    </div>
+
+    <script>
+      // === KONFIG ===
+      const SUPABASE_FUNCTIONS_BASE = "https://<DIN-PROJEKTREF>.functions.supabase.co"; // <-- BYT
+      const API_KEY_HEADER = ""; // (valfritt) lägg till om du vill ha enkel auth
+
+      // Snabbval du vill ha (kan senare komma från backend)
+      const PRESETS = [
+        "Bekräfta mottaget och säg att jag återkommer",
+        "Be om mer information",
+        "Föreslå tid för samtal",
+        "Säg nej vänligt",
+        "Skicka kort professionellt svar",
+      ];
+
+      const statusEl = document.getElementById("status");
+      const fromBadge = document.getElementById("fromBadge");
+      const subjectBadge = document.getElementById("subjectBadge");
+      const quickActions = document.getElementById("quickActions");
+      const instructionEl = document.getElementById("instruction");
+      const btnGenerate = document.getElementById("btnGenerate");
+      const btnCopy = document.getElementById("btnCopy");
+      const draftEl = document.getElementById("draft");
+
+      const remindCheck = document.getElementById("remindCheck");
+      const remindPreset = document.getElementById("remindPreset");
+      const remindAt = document.getElementById("remindAt");
+      const btnSaveReminder = document.getElementById("btnSaveReminder");
+
+      let current = { subject:"", from:"", bodyText:"", itemId:"" };
+
+      function setStatus(s){ statusEl.textContent = s; }
+
+      function getHeaderSafe() {
+        const item = Office.context.mailbox.item;
+        const subject = item?.subject || "(saknar ämne)";
+        const from = item?.from?.emailAddress || item?.from?.displayName || "(saknar avsändare)";
+        // itemId finns i vissa klienter; annars tomt
+        const itemId = item?.itemId || "";
+        return { subject, from, itemId };
+      }
+
+      function getBodyTextAsync() {
+        return new Promise((resolve, reject) => {
+          const item = Office.context.mailbox.item;
+          if (!item?.body?.getAsync) return reject(new Error("Kunde inte läsa brödtext."));
+          item.body.getAsync(Office.CoercionType.Text, (res) => {
+            if (res.status === Office.AsyncResultStatus.Succeeded) resolve(res.value || "");
+            else reject(res.error || new Error("Kunde inte läsa brödtext."));
+          });
+        });
+      }
+
+      function trimBody(text) {
+        // enkel trim: kapa långa trådar, detta kan göras bättre senare
+        const maxChars = 6000;
+        let t = (text || "").trim();
+        // stoppa vid vanliga reply-markörer
+        const markers = ["\nFrom:", "\nFrån:", "\n-----Original Message-----", "\n________________________________"];
+        for (const m of markers) {
+          const idx = t.indexOf(m);
+          if (idx > 200) { t = t.slice(0, idx).trim(); break; }
+        }
+        if (t.length > maxChars) t = t.slice(0, maxChars) + "\n…";
+        return t;
+      }
+
+      function renderPresets() {
+        quickActions.innerHTML = "";
+        PRESETS.forEach((p) => {
+          const b = document.createElement("button");
+          b.textContent = p;
+          b.addEventListener("click", () => runGenerate(p));
+          quickActions.appendChild(b);
+        });
+      }
+
+      async function loadCurrentEmail() {
+        try {
+          setStatus("Läser mejl…");
+          btnGenerate.disabled = true;
+          const { subject, from, itemId } = getHeaderSafe();
+          const bodyText = trimBody(await getBodyTextAsync());
+          current = { subject, from, itemId, bodyText };
+          fromBadge.textContent = `Från: ${from}`;
+          subjectBadge.textContent = `Ämne: ${subject}`;
+          setStatus("Redo ✅");
+          btnGenerate.disabled = false;
+        } catch (e) {
+          setStatus("Fel: " + (e?.message || e));
+        }
+      }
+
+      async function apiPost(path, payload) {
+        const headers = { "Content-Type": "application/json" };
+        if (API_KEY_HEADER) headers["x-api-key"] = API_KEY_HEADER;
+        const res = await fetch(`${SUPABASE_FUNCTIONS_BASE}${path}`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify(payload),
+        });
+        if (!res.ok) {
+          const txt = await res.text().catch(()=> "");
+          throw new Error(`API-fel (${res.status}): ${txt || res.statusText}`);
+        }
+        return await res.json();
+      }
+
+      async function runGenerate(directive) {
+        try {
+          setStatus("Genererar…");
+          draftEl.textContent = "Genererar…";
+          btnCopy.disabled = true;
+
+          const payload = {
+            subject: current.subject,
+            from: current.from,
+            bodyText: current.bodyText,
+            itemId: current.itemId,
+            directive,
+          };
+
+          const data = await apiPost("/generate-reply", payload);
+          draftEl.textContent = data?.draft || "(tomt)";
+          btnCopy.disabled = false;
+          setStatus("Klart ✅");
+        } catch (e) {
+          setStatus("Fel: " + (e?.message || e));
+          draftEl.textContent = "Kunde inte generera. Prova igen.";
+        }
+      }
+
+      btnGenerate.addEventListener("click", () => {
+        const directive = instructionEl.value.trim();
+        if (!directive) return;
+        runGenerate(directive);
+      });
+
+      btnCopy.addEventListener("click", async () => {
+        try {
+          await navigator.clipboard.writeText(draftEl.textContent || "");
+          setStatus("Kopierat ✅");
+        } catch {
+          setStatus("Kunde inte kopiera.");
+        }
+      });
+
+      function computeRemindAt(preset) {
+        const now = new Date();
+        if (preset === "2d") now.setDate(now.getDate() + 2);
+        else if (preset === "3d") now.setDate(now.getDate() + 3);
+        else if (preset === "1w") now.setDate(now.getDate() + 7);
+        return now;
+      }
+
+      remindCheck.addEventListener("change", () => {
+        const on = remindCheck.checked;
+        remindPreset.disabled = !on;
+        btnSaveReminder.disabled = !on;
+        if (on) {
+          const d = computeRemindAt(remindPreset.value);
+          remindAt.value = d.toISOString().slice(0,16);
+          remindAt.disabled = (remindPreset.value !== "custom");
+        } else {
+          remindAt.disabled = true;
+        }
+      });
+
+      remindPreset.addEventListener("change", () => {
+        if (remindPreset.value === "custom") {
+          remindAt.disabled = false;
+        } else {
+          const d = computeRemindAt(remindPreset.value);
+          remindAt.value = d.toISOString().slice(0,16);
+          remindAt.disabled = true;
+        }
+      });
+
+      btnSaveReminder.addEventListener("click", async () => {
+        try {
+          const when = remindAt.value;
+          if (!when) return;
+          setStatus("Sparar påminnelse…");
+          await apiPost("/create-reminder", {
+            subject: current.subject,
+            from: current.from,
+            itemId: current.itemId,
+            remindAt: new Date(when).toISOString(),
+            snippet: current.bodyText.slice(0, 400),
+          });
+          setStatus("Påminnelse sparad ✅");
+        } catch (e) {
+          setStatus("Fel: " + (e?.message || e));
+        }
+      });
+
+      Office.onReady(async () => {
+        setStatus("Init…");
+        renderPresets();
+        await loadCurrentEmail();
+      });
+    </script>
   </body>
 </html>
