@@ -46,6 +46,7 @@
       <pre id="draft">Väntar…</pre>
     </div>
 
+    <!-- Om du inte använder reminders kan du ta bort denna card helt -->
     <div class="card">
       <div class="row">
         <label class="row" style="gap:6px;">
@@ -67,11 +68,23 @@
     </div>
 
     <script>
-      // === KONFIG ===
-      const SUPABASE_FUNCTIONS_BASE = "https://peglcffmlhzifcsfvffa.supabase.co/functions/v1"; // <-- BYT
-      const API_KEY_HEADER = "mahad_is_g"; // (valfritt) lägg till om du vill ha enkel auth
+      // =========================
+      // KONFIG (BYT DESSA 3)
+      // =========================
 
-      // Snabbval du vill ha (kan senare komma från backend)
+      // 1) Din Supabase project ref:
+      const PROJECT_REF = "peglcffmlhzifcsfvffa"; // <-- din verkar vara denna redan
+
+      // 2) Din Supabase ANON KEY (måste finnas, annars får du 401 Missing authorization header)
+      const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBlZ2xjZmZtbGh6aWZjc2Z2ZmZhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc1NzE2NzUsImV4cCI6MjA4MzE0NzY3NX0.veYlaGU8t75oX7rksxccAXOq3vcLrTbyR78WVRrpMUU"; // <-- BYT
+
+      // 3) Din PANEL_API_KEY (valfritt – används bara om du checkar den i din Edge Function)
+      const PANEL_API_KEY = "mahad_is_g"; // <-- kan vara "" om du inte vill använda
+
+      // Base URL till Supabase Edge Functions
+      const SUPABASE_FUNCTIONS_BASE = `https://${PROJECT_REF}.supabase.co/functions/v1`;
+
+      // Snabbval
       const PRESETS = [
         "Bekräfta mottaget och säg att jag återkommer",
         "Be om mer information",
@@ -102,7 +115,6 @@
         const item = Office.context.mailbox.item;
         const subject = item?.subject || "(saknar ämne)";
         const from = item?.from?.emailAddress || item?.from?.displayName || "(saknar avsändare)";
-        // itemId finns i vissa klienter; annars tomt
         const itemId = item?.itemId || "";
         return { subject, from, itemId };
       }
@@ -119,10 +131,8 @@
       }
 
       function trimBody(text) {
-        // enkel trim: kapa långa trådar, detta kan göras bättre senare
         const maxChars = 6000;
         let t = (text || "").trim();
-        // stoppa vid vanliga reply-markörer
         const markers = ["\nFrom:", "\nFrån:", "\n-----Original Message-----", "\n________________________________"];
         for (const m of markers) {
           const idx = t.indexOf(m);
@@ -159,13 +169,21 @@
       }
 
       async function apiPost(path, payload) {
-        const headers = { "Content-Type": "application/json" };
-        if (API_KEY_HEADER) headers["x-api-key"] = API_KEY_HEADER;
+        const headers = {
+          "Content-Type": "application/json",
+          // ✅ Detta löser 401 "Missing authorization header"
+          "Authorization": `Bearer ${SUPABASE_ANON_KEY}`,
+        };
+
+        // Valfri egen nyckel (om du använder den i dina egna checks)
+        if (PANEL_API_KEY) headers["x-api-key"] = PANEL_API_KEY;
+
         const res = await fetch(`${SUPABASE_FUNCTIONS_BASE}${path}`, {
           method: "POST",
           headers,
           body: JSON.stringify(payload),
         });
+
         if (!res.ok) {
           const txt = await res.text().catch(()=> "");
           throw new Error(`API-fel (${res.status}): ${txt || res.statusText}`);
@@ -187,10 +205,13 @@
             directive,
           };
 
-          const data = await apiPost("/generate-reply-index-ts", payload);
+          // ✅ Se till att function-namnet matchar exakt
+          // Om din function heter "generate-reply-index-ts" byt pathen hit.
+          const data = await apiPost("/generate-reply¨-index-ts", payload);
+
           draftEl.textContent = data?.draft || "(tomt)";
           btnCopy.disabled = false;
-          setStatus("Klart ✅");
+          setStatus(data?.cached ? "Klart ✅ (cache)" : "Klart ✅");
         } catch (e) {
           setStatus("Fel: " + (e?.message || e));
           draftEl.textContent = "Kunde inte generera. Prova igen.";
@@ -212,6 +233,7 @@
         }
       });
 
+      // Reminders (kan ignoreras om du inte använder)
       function computeRemindAt(preset) {
         const now = new Date();
         if (preset === "2d") now.setDate(now.getDate() + 2);
@@ -220,7 +242,7 @@
         return now;
       }
 
-      remindCheck.addEventListener("change", () => {
+      remindCheck?.addEventListener("change", () => {
         const on = remindCheck.checked;
         remindPreset.disabled = !on;
         btnSaveReminder.disabled = !on;
@@ -233,7 +255,7 @@
         }
       });
 
-      remindPreset.addEventListener("change", () => {
+      remindPreset?.addEventListener("change", () => {
         if (remindPreset.value === "custom") {
           remindAt.disabled = false;
         } else {
@@ -243,11 +265,12 @@
         }
       });
 
-      btnSaveReminder.addEventListener("click", async () => {
+      btnSaveReminder?.addEventListener("click", async () => {
         try {
           const when = remindAt.value;
           if (!when) return;
           setStatus("Sparar påminnelse…");
+
           await apiPost("/create-reminder", {
             subject: current.subject,
             from: current.from,
@@ -255,6 +278,7 @@
             remindAt: new Date(when).toISOString(),
             snippet: current.bodyText.slice(0, 400),
           });
+
           setStatus("Påminnelse sparad ✅");
         } catch (e) {
           setStatus("Fel: " + (e?.message || e));
