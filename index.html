@@ -187,7 +187,7 @@
             directive,
           };
 
-          const data = await apiPost("/generate-reply", payload);
+          const data = await apiPost("/generate-reply-index-ts", payload);
           draftEl.textContent = data?.draft || "(tomt)";
           btnCopy.disabled = false;
           setStatus("Klart ✅");
