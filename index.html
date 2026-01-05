@@ -207,7 +207,7 @@
 
           // ✅ Se till att function-namnet matchar exakt
           // Om din function heter "generate-reply-index-ts" byt pathen hit.
-          const data = await apiPost("/generate-reply¨-index-ts", payload);
+          const data = await apiPost("/generate-reply-index-ts", payload);
 
           draftEl.textContent = data?.draft || "(tomt)";
           btnCopy.disabled = false;
