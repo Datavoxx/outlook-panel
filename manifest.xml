@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<OfficeApp
+  xmlns="http://schemas.microsoft.com/office/appforoffice/1.1"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xmlns:bt="http://schemas.microsoft.com/office/officeappbasictypes/1.0"
+  xsi:type="MailApp">
+
+  <Id>11111111-1111-1111-1111-111111111111</Id>
+  <Version>1.0.0.0</Version>
+  <ProviderName>Datavoxx</ProviderName>
+  <DefaultLocale>sv-SE</DefaultLocale>
+
+  <DisplayName DefaultValue="AI-assistent"/>
+  <Description DefaultValue="Öppna AI-panelen i högerkanten."/>
+
+  <!-- Behövs ofta för kommandon/knapp -->
+  <IconUrl DefaultValue="https://outlook-panel.vercel.app/JIALOGO.png"/>
+  <HighResolutionIconUrl DefaultValue="https://outlook-panel.vercel.app/JIALOGO.png"/>
+  <SupportUrl DefaultValue="https://outlook-panel.vercel.app"/>
+
+  <Hosts>
+    <Host Name="Mailbox"/>
+  </Hosts>
+
+  <Requirements>
+    <Sets>
+      <Set Name="Mailbox" MinVersion="1.8"/>
+    </Sets>
+  </Requirements>
+
+  <!-- Din klient har krävt FormSettings + RequestedHeight -->
+  <FormSettings>
+    <Form xsi:type="ItemRead">
+      <DesktopSettings>
+        <SourceLocation DefaultValue="https://outlook-panel.vercel.app"/>
+        <RequestedHeight>250</RequestedHeight>
+      </DesktopSettings>
+    </Form>
+  </FormSettings>
+
+  <Permissions>ReadItem</Permissions>
+
+  <Rule xsi:type="RuleCollection" Mode="Or">
+    <Rule xsi:type="ItemIs" ItemType="Message" FormType="Read"/>
+  </Rule>
+
+  <!-- VIKTIGT: VersionOverrides med rätt xmlns + xsi:type -->
+  <VersionOverrides
+    xmlns="http://schemas.microsoft.com/office/mailappversionoverrides"
+    xsi:type="VersionOverridesV1_0">
+
+    <Requirements>
+      <bt:Sets DefaultMinVersion="1.8">
+        <bt:Set Name="Mailbox"/>
+      </bt:Sets>
+    </Requirements>
+
+    <Hosts>
+      <Host xsi:type="MailHost">
+        <DesktopFormFactor>
+          <ExtensionPoint xsi:type="MessageReadCommandSurface">
+            <OfficeTab id="TabDefault">
+              <Group id="dv.group">
+                <Label resid="dv.groupLabel"/>
+                <Control xsi:type="Button" id="dv.openPane">
+                  <Label resid="dv.buttonLabel"/>
+                  <Supertip>
+                    <Title resid="dv.buttonLabel"/>
+                    <Description resid="dv.buttonDesc"/>
+                  </Supertip>
+                  <Icon>
+                    <bt:Image size="16" resid="dv.icon16"/>
+                    <bt:Image size="32" resid="dv.icon32"/>
+                    <bt:Image size="80" resid="dv.icon80"/>
+                  </Icon>
+                  <Action xsi:type="ShowTaskpane">
+                    <SourceLocation resid="dv.taskpaneUrl"/>
+                  </Action>
+                </Control>
+              </Group>
+            </OfficeTab>
+          </ExtensionPoint>
+        </DesktopFormFactor>
+      </Host>
+    </Hosts>
+
+    <Resources>
+      <bt:Images>
+        <bt:Image id="dv.icon16" DefaultValue="https://outlook-panel.vercel.app/JIALOGO.png"/>
+        <bt:Image id="dv.icon32" DefaultValue="https://outlook-panel.vercel.app/JIALOGO.png"/>
+        <bt:Image id="dv.icon80" DefaultValue="https://outlook-panel.vercel.app/JIALOGO.png"/>
+      </bt:Images>
+
+      <bt:Urls>
+        <bt:Url id="dv.taskpaneUrl" DefaultValue="https://outlook-panel.vercel.app"/>
+      </bt:Urls>
+
+      <bt:ShortStrings>
+        <bt:String id="dv.groupLabel" DefaultValue="AI"/>
+        <bt:String id="dv.buttonLabel" DefaultValue="AI-assistent"/>
+      </bt:ShortStrings>
+
+      <bt:LongStrings>
+        <bt:String id="dv.buttonDesc" DefaultValue="Öppna AI-panelen för detta mejl."/>
+      </bt:LongStrings>
+    </Resources>
+  </VersionOverrides>
+
+</OfficeApp>
